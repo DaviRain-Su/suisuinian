@@ -132,7 +132,7 @@ export const fetchCommentsForPost = async (
         commentPage.comments.forEach((c: any, idx: number) => {
           // Anchor returns BN for numbers, convert as needed
           const timestamp = new BN(c.timestamp).toNumber();
-          const parentIndex = new BN(c.parentIndex).toNumber();
+          const parentIndex = c.parentIndex; // Keep as BN to handle u64::MAX
           const likeCount = c.likeCount; // u32 usually maps to number or BN, check logic
 
           const globalIndex = (i * COMMENTS_PER_PAGE) + idx;
