@@ -1,0 +1,197 @@
+{
+  "version": "0.1.0",
+  "name": "suisuinian",
+  "metadata": {
+    "address": "F9UhuiZHK4HK3L7KJXMs5YjYoq5fmogdcgkajNTKYzCu"
+  },
+  "address": "F9UhuiZHK4HK3L7KJXMs5YjYoq5fmogdcgkajNTKYzCu",
+  "instructions": [
+    {
+      "name": "createPost",
+      "accounts": [
+        {
+          "name": "post",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "author",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "topic",
+          "type": "string"
+        },
+        {
+          "name": "content",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "addComment",
+      "accounts": [
+        {
+          "name": "post",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "commentPage",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "author",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "content",
+          "type": "string"
+        },
+        {
+          "name": "parentIndex",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initCommentPage",
+      "accounts": [
+        {
+          "name": "post",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "newPage",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "author",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Post",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "author",
+            "type": "publicKey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "topic",
+            "type": "string"
+          },
+          {
+            "name": "content",
+            "type": "string"
+          },
+          {
+            "name": "commentCount",
+            "type": "u64"
+          },
+          {
+            "name": "lastCommentPage",
+            "type": { "option": "publicKey" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CommentPage",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "post",
+            "type": "publicKey"
+          },
+          {
+            "name": "pageIndex",
+            "type": "u64"
+          },
+          {
+            "name": "comments",
+            "type": {
+              "vec": {
+                "defined": "CompactComment"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "CompactComment",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "author",
+            "type": "publicKey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "parentIndex",
+            "type": "u64"
+          },
+          {
+            "name": "content",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ContentTooLong",
+      "msg": "The content is too long."
+    },
+    {
+      "code": 6001,
+      "name": "PageFull",
+      "msg": "The comment page is full."
+    }
+  ]
+}
