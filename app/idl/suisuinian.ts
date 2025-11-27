@@ -1,4 +1,10 @@
-{
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/suisuinian.json`.
+ */
+export type Suisuinian = {
   "address": "F9UhuiZHK4HK3L7KJXMs5YjYoq5fmogdcgkajNTKYzCu",
   "metadata": {
     "name": "suisuinian",
@@ -8,7 +14,7 @@
   },
   "instructions": [
     {
-      "name": "add_comment",
+      "name": "addComment",
       "discriminator": [
         59,
         175,
@@ -25,7 +31,7 @@
           "writable": true
         },
         {
-          "name": "comment_page",
+          "name": "commentPage",
           "writable": true
         },
         {
@@ -34,7 +40,7 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
@@ -44,13 +50,13 @@
           "type": "string"
         },
         {
-          "name": "parent_index",
+          "name": "parentIndex",
           "type": "u64"
         }
       ]
     },
     {
-      "name": "create_post",
+      "name": "createPost",
       "discriminator": [
         123,
         92,
@@ -73,7 +79,7 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
@@ -89,7 +95,7 @@
       ]
     },
     {
-      "name": "init_comment_page",
+      "name": "initCommentPage",
       "discriminator": [
         50,
         38,
@@ -106,7 +112,7 @@
           "writable": true
         },
         {
-          "name": "new_page",
+          "name": "newPage",
           "writable": true
         },
         {
@@ -115,14 +121,14 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
     },
     {
-      "name": "like_comment",
+      "name": "likeComment",
       "discriminator": [
         129,
         249,
@@ -138,11 +144,11 @@
           "name": "post"
         },
         {
-          "name": "comment_page",
+          "name": "commentPage",
           "writable": true
         },
         {
-          "name": "user_comment_likes",
+          "name": "userCommentLikes",
           "writable": true,
           "pda": {
             "seeds": [
@@ -186,19 +192,19 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "comment_global_index",
+          "name": "commentGlobalIndex",
           "type": "u64"
         }
       ]
     },
     {
-      "name": "like_post",
+      "name": "likePost",
       "discriminator": [
         45,
         242,
@@ -214,7 +220,7 @@
           "name": "post"
         },
         {
-          "name": "user_like",
+          "name": "userLike",
           "writable": true,
           "pda": {
             "seeds": [
@@ -249,14 +255,14 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
     },
     {
-      "name": "tip_post",
+      "name": "tipPost",
       "discriminator": [
         23,
         199,
@@ -282,13 +288,13 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "amount_lamports",
+          "name": "amountLamports",
           "type": "u64"
         }
       ]
@@ -296,7 +302,7 @@
   ],
   "accounts": [
     {
-      "name": "CommentPage",
+      "name": "commentPage",
       "discriminator": [
         236,
         61,
@@ -309,7 +315,7 @@
       ]
     },
     {
-      "name": "Post",
+      "name": "post",
       "discriminator": [
         8,
         147,
@@ -322,7 +328,7 @@
       ]
     },
     {
-      "name": "UserCommentLikes",
+      "name": "userCommentLikes",
       "discriminator": [
         25,
         154,
@@ -335,7 +341,7 @@
       ]
     },
     {
-      "name": "UserLike",
+      "name": "userLike",
       "discriminator": [
         72,
         184,
@@ -351,33 +357,33 @@
   "errors": [
     {
       "code": 6000,
-      "name": "ContentTooLong",
+      "name": "contentTooLong",
       "msg": "The content is too long."
     },
     {
       "code": 6001,
-      "name": "PageFull",
+      "name": "pageFull",
       "msg": "The comment page is full."
     },
     {
       "code": 6002,
-      "name": "CommentIndexOutOfBounds",
+      "name": "commentIndexOutOfBounds",
       "msg": "Comment index out of bounds for tracking."
     },
     {
       "code": 6003,
-      "name": "AlreadyLiked",
+      "name": "alreadyLiked",
       "msg": "Already liked this comment."
     },
     {
       "code": 6004,
-      "name": "CommentNotFound",
+      "name": "commentNotFound",
       "msg": "Comment not found in page."
     }
   ],
   "types": [
     {
-      "name": "CommentPage",
+      "name": "commentPage",
       "type": {
         "kind": "struct",
         "fields": [
@@ -386,7 +392,7 @@
             "type": "pubkey"
           },
           {
-            "name": "page_index",
+            "name": "pageIndex",
             "type": "u64"
           },
           {
@@ -394,7 +400,7 @@
             "type": {
               "vec": {
                 "defined": {
-                  "name": "CompactComment"
+                  "name": "compactComment"
                 }
               }
             }
@@ -403,7 +409,7 @@
       }
     },
     {
-      "name": "CompactComment",
+      "name": "compactComment",
       "type": {
         "kind": "struct",
         "fields": [
@@ -416,7 +422,7 @@
             "type": "i64"
           },
           {
-            "name": "parent_index",
+            "name": "parentIndex",
             "type": "u64"
           },
           {
@@ -424,14 +430,14 @@
             "type": "string"
           },
           {
-            "name": "like_count",
+            "name": "likeCount",
             "type": "u32"
           }
         ]
       }
     },
     {
-      "name": "Post",
+      "name": "post",
       "type": {
         "kind": "struct",
         "fields": [
@@ -452,11 +458,11 @@
             "type": "string"
           },
           {
-            "name": "comment_count",
+            "name": "commentCount",
             "type": "u64"
           },
           {
-            "name": "last_comment_page",
+            "name": "lastCommentPage",
             "type": {
               "option": "pubkey"
             }
@@ -465,7 +471,7 @@
       }
     },
     {
-      "name": "UserCommentLikes",
+      "name": "userCommentLikes",
       "type": {
         "kind": "struct",
         "fields": [
@@ -478,7 +484,7 @@
             "type": "pubkey"
           },
           {
-            "name": "likes_bitmap",
+            "name": "likesBitmap",
             "type": {
               "array": [
                 "u8",
@@ -490,7 +496,7 @@
       }
     },
     {
-      "name": "UserLike",
+      "name": "userLike",
       "type": {
         "kind": "struct",
         "fields": [
@@ -506,4 +512,4 @@
       }
     }
   ]
-}
+};

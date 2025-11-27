@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 
 declare_id!("F9UhuiZHK4HK3L7KJXMs5YjYoq5fmogdcgkajNTKYzCu");
 
@@ -44,14 +45,11 @@ pub mod suisuinian {
             timestamp: clock.unix_timestamp,
             parent_index, // u64::MAX if no parent
             content,
+            like_count: 0,
         };
 
         comment_page.comments.push(new_comment);
 
-        // If this is the first comment on a new page, verify logic or linking
-        // (The linking happens in `init_comment_page` usually, but here we assume 
-        // the client provides the correct 'current' page to write to).
-        
         // Increment global comment count
         post.comment_count = post.comment_count.checked_add(1).unwrap();
 
@@ -64,16 +62,8 @@ pub mod suisuinian {
         let post = &mut ctx.accounts.post;
         let new_page = &mut ctx.accounts.new_page;
         
-        // Link previous page if exists (optional logic, for now we just point post to new page)
-        // In a strict linked list, we would need to update the `next` pointer of the old page.
-        // For simplicity v1: We just update the Post to point to the NEW head (or tail).
-        // Let's treat `last_comment_page` as the TAIL (where we write).
-        
-        if let Some(old_tail_key) = post.last_comment_page {
-            // Ideally we link old_tail.next = new_page.key()
-            // But that requires passing the old page as writable.
-            // To save CUs/complexity, we can rely on deterministic PDA indexing:
-            // Page 0, Page 1, Page 2...
+        if let Some(_old_tail_key) = post.last_comment_page {
+            // Optional linking logic here
         }
 
         new_page.post = post.key();
@@ -83,6 +73,76 @@ pub mod suisuinian {
         post.last_comment_page = Some(new_page.key());
 
         msg!("Initialized Comment Page #{}", new_page.page_index);
+        Ok(())
+    }
+
+    pub fn tip_post(ctx: Context<TipPost>, amount_lamports: u64) -> Result<()> {
+        let ix = system_program::Transfer {
+            from: ctx.accounts.payer.to_account_info(),
+            to: ctx.accounts.author.to_account_info(),
+        };
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                ix
+            ),
+            amount_lamports,
+        )?;
+        msg!("Tipped {} lamports to post author", amount_lamports);
+        Ok(())
+    }
+
+    pub fn like_post(ctx: Context<LikePost>) -> Result<()> {
+        let user_like = &mut ctx.accounts.user_like;
+        user_like.user = ctx.accounts.user.key();
+        user_like.post = ctx.accounts.post.key();
+        // We don't strictly need a counter on Post for this MVP unless required, 
+        // but the existence of UserLike PDA confirms the like.
+        msg!("Post liked by {}", ctx.accounts.user.key());
+        Ok(())
+    }
+
+    pub fn like_comment(ctx: Context<LikeComment>, comment_global_index: u64) -> Result<()> {
+        let comment_page = &mut ctx.accounts.comment_page;
+        let user_comment_likes = &mut ctx.accounts.user_comment_likes;
+
+        // 1. Update the bitmask in UserCommentLikes
+        // We map global index to the bitmask. 
+        // NOTE: This bitmask is per-post. 128 bytes = 1024 bits.
+        // This supports up to 1024 comments per post for liking tracking for a single user.
+        // If comments > 1024, this simple bitmap approach fails for user tracking.
+        // For this prototype, we assume < 1024 comments or we just wrap/ignore (which is buggy but acceptable for MVP).
+        
+        let byte_index = (comment_global_index / 8) as usize;
+        let bit_offset = (comment_global_index % 8) as u8;
+
+        if byte_index >= user_comment_likes.likes_bitmap.len() {
+            return err!(ErrorCode::CommentIndexOutOfBounds);
+        }
+
+        // Check if already liked
+        let is_liked = (user_comment_likes.likes_bitmap[byte_index] >> bit_offset) & 1;
+        if is_liked == 1 {
+            return err!(ErrorCode::AlreadyLiked);
+        }
+
+        // Set bit
+        user_comment_likes.likes_bitmap[byte_index] |= 1 << bit_offset;
+
+        // 2. Update the count on the comment itself
+        // Find the comment in the current page.
+        // The comment_page passed in MUST match the comment_global_index.
+        // Index in page = global % 10
+        let local_index = (comment_global_index % 10) as usize;
+        
+        if local_index >= comment_page.comments.len() {
+             return err!(ErrorCode::CommentNotFound);
+        }
+
+        let comment = &mut comment_page.comments[local_index];
+        comment.like_count = comment.like_count.checked_add(1).unwrap();
+
+        msg!("Comment {} liked", comment_global_index);
         Ok(())
     }
 }
@@ -106,8 +166,8 @@ pub struct InitCommentPage<'info> {
         init,
         payer = author,
         // Space: Disc(8) + PostKey(32) + Index(8) + VecPrefix(4) + 10 * CompactCommentSize
-        // CompactComment: Author(32) + Time(8) + Parent(8) + Content(4+100) = 152
-        // Total = 8 + 32 + 8 + 4 + (10 * 152) + Padding(50) = 1622
+        // CompactComment: Author(32) + Time(8) + Parent(8) + Content(4+100) + LikeCount(4) = 156
+        // Total = 8 + 32 + 8 + 4 + (10 * 156) + Padding(50) = 1662
         space = 1700, 
         seeds = [b"comment_page", post.key().as_ref(), &(post.comment_count / 10).to_le_bytes()],
         bump
@@ -136,6 +196,61 @@ pub struct AddComment<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct TipPost<'info> {
+    #[account(mut)]
+    pub post: Account<'info, Post>,
+    /// CHECK: We just transfer to this account, no data read needed (verification done via post.author if needed, but here we trust client passes correct author or we check against post)
+    #[account(mut, address = post.author)] 
+    pub author: AccountInfo<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct LikePost<'info> {
+    pub post: Account<'info, Post>,
+    #[account(
+        init,
+        payer = user,
+        space = 8 + 32 + 32, // Disc + User + Post
+        seeds = [b"user_like", user.key().as_ref(), post.key().as_ref()],
+        bump
+    )]
+    pub user_like: Account<'info, UserLike>,
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(comment_global_index: u64)]
+pub struct LikeComment<'info> {
+    pub post: Account<'info, Post>,
+    
+    #[account(
+        mut,
+        seeds = [b"comment_page", post.key().as_ref(), &(comment_global_index / 10).to_le_bytes()],
+        bump
+    )]
+    pub comment_page: Account<'info, CommentPage>,
+
+    #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + 32 + 32 + 128, // Disc + User + Post + Bitmap(128)
+        seeds = [b"user_comment_likes", user.key().as_ref(), post.key().as_ref()],
+        bump
+    )]
+    pub user_comment_likes: Account<'info, UserCommentLikes>,
+
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+
 #[account]
 pub struct Post {
     pub author: Pubkey,
@@ -153,12 +268,26 @@ pub struct CommentPage {
     pub comments: Vec<CompactComment>,
 }
 
+#[account]
+pub struct UserLike {
+    pub user: Pubkey,
+    pub post: Pubkey,
+}
+
+#[account]
+pub struct UserCommentLikes {
+    pub user: Pubkey,
+    pub post: Pubkey,
+    pub likes_bitmap: [u8; 128], 
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct CompactComment {
     pub author: Pubkey,
     pub timestamp: i64,
-    pub parent_index: u64, // Global index of the parent comment, or u64::MAX
+    pub parent_index: u64, 
     pub content: String,
+    pub like_count: u32,
 }
 
 #[error_code]
@@ -167,4 +296,10 @@ pub enum ErrorCode {
     ContentTooLong,
     #[msg("The comment page is full.")]
     PageFull,
+    #[msg("Comment index out of bounds for tracking.")]
+    CommentIndexOutOfBounds,
+    #[msg("Already liked this comment.")]
+    AlreadyLiked,
+    #[msg("Comment not found in page.")]
+    CommentNotFound,
 }
