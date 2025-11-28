@@ -30,6 +30,15 @@ Located in `app/`.
   - **Note:** Uses standard Anchor fetch methods with strict type safety from the generated IDL.
 - **UI Components:** Standard Next.js structure (`app/page.tsx` main feed, `components/` for UI elements).
 
+## Implemented Features (Current State)
+- **Post Creation & Viewing:** Users can create posts with topics and content, and view a feed of all posts.
+- **Commenting:** Users can add nested comments to posts, with a paged architecture for efficiency.
+- **Post Liking:** Users can like posts, tracked via a `UserLike` PDA.
+- **Post Tipping:** Users can tip post authors with SOL.
+- **Comment Liking:** Users can like individual comments, tracked via a `UserCommentLikes` PDA bitmap.
+- **Topic Filtering:** Posts can be filtered client-side by clicking on topic tags.
+- **Enhanced UI/UX:** Integration of `react-hot-toast` for friendly notifications.
+
 ## Building and Running
 
 ### Prerequisites

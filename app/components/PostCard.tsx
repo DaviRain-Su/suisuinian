@@ -38,12 +38,14 @@ interface PostCardProps {
     commentCount: number;
   };
   refreshPosts: () => void;
+  onTopicClick: (topic: string | null) => void;
 }
 
 export const PostCard: React.FC<PostCardProps> = ({
   postPublicKey,
   postAccount,
   refreshPosts,
+  onTopicClick,
 }) => {
   const program = useProgram();
   const [comments, setComments] = useState<FullComment[]>([]);
@@ -277,9 +279,12 @@ export const PostCard: React.FC<PostCardProps> = ({
                   {authorStr.slice(0, 4)}...{authorStr.slice(-4)}
                 </span>
                 {postAccount.topic && (
-                  <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium">
+                  <button // Make the topic clickable
+                    onClick={() => onTopicClick(postAccount.topic)}
+                    className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium hover:bg-purple-200 dark:hover:bg-purple-800 transition-colors"
+                  >
                     {postAccount.topic}
-                  </span>
+                  </button>
                 )}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">

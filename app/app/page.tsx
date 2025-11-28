@@ -4,7 +4,7 @@ import { PostCard } from "@/components/PostCard";
 import { useProgram } from "@/hooks/useProgram";
 import { fetchPosts } from "@/utils/suisuinian";
 import { PublicKey } from "@solana/web3.js";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 
 // Define a type for the Post account data for better type safety
@@ -27,6 +27,8 @@ export default function Home() {
   const [posts, setPosts] = useState<FullPost[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [errorFetchingPosts, setErrorFetchingPosts] = useState<string | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+  const [allTopics, setAllTopics] = useState<string[]>([]);
 
   const getPosts = useCallback(async () => {
     if (!program) return;
@@ -35,6 +37,15 @@ export default function Home() {
     try {
       const fetchedPosts = await fetchPosts(program);
       setPosts(fetchedPosts as FullPost[]); 
+
+      // Extract unique topics
+      const topics = new Set<string>();
+      fetchedPosts.forEach(post => {
+        if (post.account.topic) {
+          topics.add(post.account.topic);
+        }
+      });
+      setAllTopics(Array.from(topics).sort()); // Sort topics alphabetically
     } catch (err: any) {
       console.error("Error fetching posts:", err);
       setErrorFetchingPosts(err.message || "Failed to fetch posts.");
@@ -46,6 +57,17 @@ export default function Home() {
   useEffect(() => {
     getPosts();
   }, [getPosts]);
+
+  const handleTopicClick = useCallback((topic: string | null) => {
+    setSelectedTopic(topic);
+  }, []);
+
+  const filteredPosts = useMemo(() => {
+    if (!selectedTopic) {
+      return posts;
+    }
+    return posts.filter(post => post.account.topic === selectedTopic);
+  }, [posts, selectedTopic]);
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
@@ -67,6 +89,35 @@ export default function Home() {
         </Link>
       </div>
 
+      {/* Topic Filter Bar */}
+      {allTopics.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-8 -mt-4">
+          <button
+            onClick={() => handleTopicClick(null)}
+            className={`px-3 py-1 text-sm font-medium rounded-full transition-colors ${
+              selectedTopic === null
+                ? "bg-blue-600 text-white shadow"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+            }`}
+          >
+            All Posts
+          </button>
+          {allTopics.map(topic => (
+            <button
+              key={topic}
+              onClick={() => handleTopicClick(topic)}
+              className={`px-3 py-1 text-sm font-medium rounded-full transition-colors ${
+                selectedTopic === topic
+                  ? "bg-blue-600 text-white shadow"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              }`}
+            >
+              {topic}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-6">
         {loadingPosts && (
           <div className="space-y-4">
@@ -87,10 +138,14 @@ export default function Home() {
           </div>
         )}
 
-        {posts.length === 0 && !loadingPosts && !errorFetchingPosts && (
+        {filteredPosts.length === 0 && !loadingPosts && !errorFetchingPosts && (
           <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl border border-dashed border-gray-300 dark:border-gray-700">
-            <h3 className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">No posts yet</h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Get the conversation started.</p>
+            <h3 className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
+              {selectedTopic ? `No posts found for topic "${selectedTopic}"` : "No posts yet"}
+            </h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {selectedTopic ? "Try another topic or create a new post!" : "Get the conversation started."}
+            </p>
             <div className="mt-6">
               <Link
                 href="/create"
@@ -102,12 +157,13 @@ export default function Home() {
           </div>
         )}
 
-        {posts.map((post) => (
+        {filteredPosts.map((post) => (
           <PostCard
             key={post.publicKey.toBase58()}
             postPublicKey={post.publicKey}
             postAccount={post.account}
             refreshPosts={getPosts}
+            onTopicClick={handleTopicClick} // Pass the handler down
           />
         ))}
       </div>
@@ -122,3 +178,4 @@ export default function Home() {
     </main>
   );
 }
+
