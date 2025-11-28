@@ -15,10 +15,14 @@
     "@solana/wallet-adapter-react-ui": "^0.9.35",
     "@solana/wallet-adapter-wallets": "^0.19.24",
     "@solana/web3.js": "^1.87.6",
+    "@tailwindcss/typography": "^0.5.19",
     "next": "^14.2.33",
     "react": "^18",
     "react-dom": "^18",
-    "react-hot-toast": "^2.6.0"
+    "react-hot-toast": "^2.6.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-typography": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20",

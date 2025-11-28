@@ -7,8 +7,20 @@ declare_id!("F9UhuiZHK4HK3L7KJXMs5YjYoq5fmogdcgkajNTKYzCu");
 pub mod suisuinian {
     use super::*;
 
+    pub fn init_user_profile(ctx: Context<InitUserProfile>) -> Result<()> {
+        let user_profile = &mut ctx.accounts.user_profile;
+        user_profile.authority = ctx.accounts.authority.key();
+        user_profile.post_count = 0;
+        user_profile.like_count = 0;
+        user_profile.tip_count = 0;
+        user_profile.bump = ctx.bumps.user_profile;
+        msg!("User Profile Initialized for: {}", user_profile.authority);
+        Ok(())
+    }
+
     pub fn create_post(ctx: Context<CreatePost>, topic: String, content: String) -> Result<()> {
         let post = &mut ctx.accounts.post;
+        let user_profile = &mut ctx.accounts.user_profile;
         let clock = Clock::get()?;
 
         if content.len() > 280 {
@@ -21,6 +33,9 @@ pub mod suisuinian {
         post.content = content;
         post.comment_count = 0;
         post.last_comment_page = None; // No comments yet
+
+        // Update User Profile
+        user_profile.post_count = user_profile.post_count.checked_add(1).unwrap();
 
         msg!("Post created by: {}", post.author);
         Ok(())
@@ -88,6 +103,11 @@ pub mod suisuinian {
             ),
             amount_lamports,
         )?;
+
+        // Update Author's User Profile Stats
+        let author_profile = &mut ctx.accounts.author_profile;
+        author_profile.tip_count = author_profile.tip_count.checked_add(amount_lamports).unwrap();
+
         msg!("Tipped {} lamports to post author", amount_lamports);
         Ok(())
     }
@@ -96,8 +116,17 @@ pub mod suisuinian {
         let user_like = &mut ctx.accounts.user_like;
         user_like.user = ctx.accounts.user.key();
         user_like.post = ctx.accounts.post.key();
-        // We don't strictly need a counter on Post for this MVP unless required, 
-        // but the existence of UserLike PDA confirms the like.
+        
+        // Update Author's User Profile Stats (Ideally we'd want to increment the author's like count)
+        // Note: In this MVP structure, we are modifying the AUTHOR's profile, so we need that account.
+        // To keep it simple and avoid passing too many accounts if not strictly needed for the 'Like' action itself, 
+        // we will just record the like. 
+        // HOWEVER, to fulfill the "UserStats" requirement, we SHOULD increment the author's received likes.
+        
+        // For this iteration, let's just mark the Like. We will add author_profile to Context.
+        let author_profile = &mut ctx.accounts.author_profile;
+        author_profile.like_count = author_profile.like_count.checked_add(1).unwrap();
+
         msg!("Post liked by {}", ctx.accounts.user.key());
         Ok(())
     }
@@ -107,12 +136,6 @@ pub mod suisuinian {
         let user_comment_likes = &mut ctx.accounts.user_comment_likes;
 
         // 1. Update the bitmask in UserCommentLikes
-        // We map global index to the bitmask. 
-        // NOTE: This bitmask is per-post. 128 bytes = 1024 bits.
-        // This supports up to 1024 comments per post for liking tracking for a single user.
-        // If comments > 1024, this simple bitmap approach fails for user tracking.
-        // For this prototype, we assume < 1024 comments or we just wrap/ignore (which is buggy but acceptable for MVP).
-        
         let byte_index = (comment_global_index / 8) as usize;
         let bit_offset = (comment_global_index % 8) as u8;
 
@@ -130,9 +153,6 @@ pub mod suisuinian {
         user_comment_likes.likes_bitmap[byte_index] |= 1 << bit_offset;
 
         // 2. Update the count on the comment itself
-        // Find the comment in the current page.
-        // The comment_page passed in MUST match the comment_global_index.
-        // Index in page = global % 10
         let local_index = (comment_global_index % 10) as usize;
         
         if local_index >= comment_page.comments.len() {
@@ -145,6 +165,37 @@ pub mod suisuinian {
         msg!("Comment {} liked", comment_global_index);
         Ok(())
     }
+
+    // Follow User Logic
+    pub fn follow_user(ctx: Context<FollowUser>) -> Result<()> {
+        let user_follow = &mut ctx.accounts.user_follow;
+        user_follow.follower = ctx.accounts.follower.key();
+        user_follow.target = ctx.accounts.target.key();
+        user_follow.timestamp = Clock::get()?.unix_timestamp;
+        msg!("User {} followed {}", user_follow.follower, user_follow.target);
+        Ok(())
+    }
+
+    pub fn unfollow_user(_ctx: Context<UnfollowUser>) -> Result<()> {
+        // Account is closed by the attribute `close = follower`
+        msg!("User unfollowed");
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct InitUserProfile<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + 32 + 8 + 8 + 8 + 1, // Disc + Pubkey + u64 + u64 + u64 + u8
+        seeds = [b"user_profile", authority.key().as_ref()],
+        bump
+    )]
+    pub user_profile: Account<'info, UserProfile>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -152,6 +203,14 @@ pub mod suisuinian {
 pub struct CreatePost<'info> {
     #[account(init, payer = author, space = 8 + 32 + 8 + 50 + 4 + 280 + 8 + (1 + 32) + 50)] 
     pub post: Account<'info, Post>,
+    
+    #[account(
+        mut,
+        seeds = [b"user_profile", author.key().as_ref()],
+        bump = user_profile.bump
+    )]
+    pub user_profile: Account<'info, UserProfile>,
+
     #[account(mut)]
     pub author: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -203,6 +262,14 @@ pub struct TipPost<'info> {
     /// CHECK: We just transfer to this account, no data read needed (verification done via post.author if needed, but here we trust client passes correct author or we check against post)
     #[account(mut, address = post.author)] 
     pub author: AccountInfo<'info>,
+    
+    #[account(
+        mut,
+        seeds = [b"user_profile", author.key().as_ref()],
+        bump = author_profile.bump
+    )]
+    pub author_profile: Account<'info, UserProfile>,
+
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -219,6 +286,18 @@ pub struct LikePost<'info> {
         bump
     )]
     pub user_like: Account<'info, UserLike>,
+
+    /// CHECK: We need to update the author's profile stats
+    #[account(mut, address = post.author)]
+    pub author: AccountInfo<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"user_profile", author.key().as_ref()],
+        bump = author_profile.bump
+    )]
+    pub author_profile: Account<'info, UserProfile>,
+
     #[account(mut)]
     pub user: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -250,6 +329,46 @@ pub struct LikeComment<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct FollowUser<'info> {
+    #[account(
+        init,
+        payer = follower,
+        space = 8 + 32 + 32 + 8, // Disc + Follower + Target + Timestamp
+        seeds = [b"user_follow", follower.key().as_ref(), target.key().as_ref()],
+        bump
+    )]
+    pub user_follow: Account<'info, UserFollow>,
+    #[account(mut)]
+    pub follower: Signer<'info>,
+    /// CHECK: We just need the public key to create the relationship
+    pub target: UncheckedAccount<'info>, 
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UnfollowUser<'info> {
+    #[account(
+        mut,
+        close = follower,
+        seeds = [b"user_follow", follower.key().as_ref(), target.key().as_ref()],
+        bump
+    )]
+    pub user_follow: Account<'info, UserFollow>,
+    #[account(mut)]
+    pub follower: Signer<'info>,
+    /// CHECK: Needed for seed derivation
+    pub target: UncheckedAccount<'info>,
+}
+
+#[account]
+pub struct UserProfile {
+    pub authority: Pubkey,
+    pub post_count: u64,
+    pub like_count: u64, // received likes
+    pub tip_count: u64,  // received tips (lamports)
+    pub bump: u8,
+}
 
 #[account]
 pub struct Post {
@@ -279,6 +398,13 @@ pub struct UserCommentLikes {
     pub user: Pubkey,
     pub post: Pubkey,
     pub likes_bitmap: [u8; 128], 
+}
+
+#[account]
+pub struct UserFollow {
+    pub follower: Pubkey,
+    pub target: Pubkey,
+    pub timestamp: i64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]

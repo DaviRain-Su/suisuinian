@@ -8,11 +8,16 @@ import {
   likePost, 
   tipPost, 
   likeComment, 
-  getUserInteractionState 
+  getUserInteractionState,
+  followUser,
+  unfollowUser,
+  getFollowStatus
 } from "@/utils/suisuinian";
 import { CommentForm } from "./CommentForm";
 import { BN } from "@coral-xyz/anchor";
 import { toast } from "react-hot-toast";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface CompactCommentAccount {
   author: PublicKey;
@@ -59,6 +64,10 @@ export const PostCard: React.FC<PostCardProps> = ({
   const [commentLikesBitmap, setCommentLikesBitmap] = useState<number[] | null>(null);
   const [isLikeLoading, setIsLikeLoading] = useState(false);
   
+  // Follow State
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
+
   // Tipping State
   const [isTipping, setIsTipping] = useState(false);
   const [tipAmount, setTipAmount] = useState("");
@@ -99,17 +108,17 @@ export const PostCard: React.FC<PostCardProps> = ({
   const fetchInteractionState = useCallback(async () => {
     if (!program || !program.provider.publicKey) return;
     try {
-      const state = await getUserInteractionState(
-        program, 
-        postPublicKey, 
-        program.provider.publicKey
-      );
+      const [state, followStatus] = await Promise.all([
+        getUserInteractionState(program, postPublicKey, program.provider.publicKey),
+        getFollowStatus(program, postAccount.author, program.provider.publicKey)
+      ]);
       setPostLiked(state.postLiked);
       setCommentLikesBitmap(state.commentLikesBitmap);
+      setIsFollowing(followStatus);
     } catch (e) {
       console.error("Error fetching interaction state", e);
     }
-  }, [program, postPublicKey]);
+  }, [program, postPublicKey, postAccount.author]);
 
   useEffect(() => {
     fetchInteractionState();
@@ -139,6 +148,26 @@ export const PostCard: React.FC<PostCardProps> = ({
     getComments();
     refreshPosts();
     setReplyTo(undefined); 
+  };
+
+  const handleFollow = async () => {
+    if (!program || isFollowLoading) return;
+    setIsFollowLoading(true);
+    try {
+      if (isFollowing) {
+        await unfollowUser(program, postAccount.author);
+        toast.success("Unfollowed user");
+      } else {
+        await followUser(program, postAccount.author);
+        toast.success("Followed user");
+      }
+      setIsFollowing(!isFollowing);
+    } catch (e: any) {
+      console.error("Failed to toggle follow:", e);
+      toast.error(`Failed to ${isFollowing ? "unfollow" : "follow"}: ${e.message || "Unknown error"}`);
+    } finally {
+      setIsFollowLoading(false);
+    }
   };
 
   const handleLikePost = async () => {
@@ -185,7 +214,6 @@ export const PostCard: React.FC<PostCardProps> = ({
   const handleLikeComment = async (globalIndex: number) => {
     if (!program || checkCommentLiked(globalIndex)) return;
     
-    // Optimistic update (local only for bitmap)
     const newBitmap = [...(commentLikesBitmap || new Array(128).fill(0))];
     const byteIndex = Math.floor(globalIndex / 8);
     const bitOffset = globalIndex % 8;
@@ -196,7 +224,7 @@ export const PostCard: React.FC<PostCardProps> = ({
 
     try {
       await likeComment(program, postPublicKey, globalIndex);
-      getComments(); // Refresh to get updated like count from chain
+      getComments(); 
     } catch (e) {
       console.error("Failed to like comment", e);
       // Revert if needed, or just refetch state
@@ -226,9 +254,18 @@ export const PostCard: React.FC<PostCardProps> = ({
                 })}
              </span>
           </div>
-          <p className="text-sm text-gray-600 dark:text-gray-300 break-words">
-            {comment.account.content}
-          </p>
+          <div className="text-sm text-gray-600 dark:text-gray-300 break-words prose prose-sm dark:prose-invert max-w-none
+            prose-h1:text-xl prose-h1:font-extrabold prose-h1:mb-3
+            prose-h2:text-lg prose-h2:font-bold prose-h2:mt-4 prose-h2:mb-2
+            prose-ul:list-disc prose-ul:pl-4 prose-ol:list-decimal prose-ol:pl-4
+            prose-a:text-blue-500 hover:prose-a:text-blue-700
+            prose-code:bg-gray-200 dark:prose-code:bg-gray-700 prose-code:px-1 prose-code:rounded
+            prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800 prose-pre:rounded-lg prose-pre:p-2
+          ">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {comment.account.content}
+            </ReactMarkdown>
+          </div>
           
           <div className="mt-1 flex items-center gap-3">
             <button 
@@ -250,7 +287,6 @@ export const PostCard: React.FC<PostCardProps> = ({
             </button>
           </div>
 
-          {/* Render Replies */}
           {comment.replies && comment.replies.length > 0 && (
              <div className="ml-2 pl-2 border-l border-gray-100 dark:border-gray-800">
                {comment.replies.map(reply => renderCommentNode(reply, depth + 1))}
@@ -278,10 +314,23 @@ export const PostCard: React.FC<PostCardProps> = ({
                 <span className="font-medium text-gray-900 dark:text-white text-sm">
                   {authorStr.slice(0, 4)}...{authorStr.slice(-4)}
                 </span>
+                
+                <button
+                  onClick={handleFollow}
+                  disabled={isFollowLoading}
+                  className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                    isFollowing 
+                      ? "border-gray-300 text-gray-500 hover:border-red-300 hover:text-red-500 dark:border-gray-600 dark:text-gray-400"
+                      : "border-blue-500 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                  }`}
+                >
+                  {isFollowLoading ? "..." : isFollowing ? "Unfollow" : "Follow"}
+                </button>
+
                 {postAccount.topic && (
-                  <button // Make the topic clickable
+                  <button
                     onClick={() => onTopicClick(postAccount.topic)}
-                    className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium hover:bg-purple-200 dark:hover:bg-purple-800 transition-colors"
+                    className="ml-auto px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium hover:bg-purple-200 dark:hover:bg-purple-800 transition-colors"
                   >
                     {postAccount.topic}
                   </button>
@@ -299,9 +348,20 @@ export const PostCard: React.FC<PostCardProps> = ({
 
         {/* Content */}
         <div className="pl-[52px]">
-          <p className="text-gray-800 dark:text-gray-200 text-base leading-relaxed whitespace-pre-wrap">
-            {postAccount.content}
-          </p>
+          <div className="text-gray-800 dark:text-gray-200 text-base leading-relaxed prose prose-lg dark:prose-invert max-w-none break-words
+            prose-h1:text-3xl prose-h1:font-extrabold prose-h1:mb-4
+            prose-h2:text-2xl prose-h2:font-bold prose-h2:mt-6 prose-h2:mb-3
+            prose-h3:text-xl prose-h3:font-semibold prose-h3:mt-5 prose-h3:mb-2
+            prose-ul:list-disc prose-ul:pl-6 prose-ol:list-decimal prose-ol:pl-6
+            prose-li:my-1
+            prose-a:text-blue-500 hover:prose-a:text-blue-700
+            prose-code:bg-gray-200 dark:prose-code:bg-gray-700 prose-code:px-1 prose-code:rounded
+            prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800 prose-pre:rounded-lg prose-pre:p-3
+          ">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {postAccount.content}
+            </ReactMarkdown>
+          </div>
         
           {/* Actions Bar */}
           <div className="mt-4 flex items-center justify-between pt-4 border-t border-gray-50 dark:border-gray-700/50">

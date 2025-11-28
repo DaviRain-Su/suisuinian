@@ -2,11 +2,12 @@
 
 import { PostCard } from "@/components/PostCard";
 import { useProgram } from "@/hooks/useProgram";
-import { fetchPosts } from "@/utils/suisuinian";
+import { fetchPosts, initUserProfile, getUserProfile } from "@/utils/suisuinian";
 import { PublicKey } from "@solana/web3.js";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { BN } from "@coral-xyz/anchor";
+import { toast } from "react-hot-toast";
 
 interface PostAccount {
   author: PublicKey;
@@ -21,12 +22,42 @@ interface FullPost {
   account: PostAccount;
 }
 
+interface UserProfileData {
+  postCount: number;
+  likeCount: number; // Received likes
+  tipCount: number;  // Received tips (lamports)
+}
+
 export default function ProfilePage() {
   const program = useProgram();
   const { publicKey } = useWallet();
   const [posts, setPosts] = useState<FullPost[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [initProfileLoading, setInitProfileLoading] = useState(false);
+
+  const fetchProfile = useCallback(async () => {
+    if (!program || !publicKey) return;
+    setProfileLoading(true);
+    try {
+      const profileAccount = await getUserProfile(program, publicKey);
+      if (profileAccount) {
+        setUserProfile({
+          postCount: new BN(profileAccount.postCount).toNumber(),
+          likeCount: new BN(profileAccount.likeCount).toNumber(),
+          tipCount: new BN(profileAccount.tipCount).toNumber(),
+        });
+      } else {
+        setUserProfile(null);
+      }
+    } catch (err) {
+      console.error("Error fetching user profile:", err);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [program, publicKey]);
 
   const getPosts = useCallback(async () => {
     if (!program || !publicKey) return;
@@ -34,7 +65,6 @@ export default function ProfilePage() {
     setError(null);
     try {
       const allPosts = await fetchPosts(program);
-      // Filter posts by current user's public key
       const userPosts = (allPosts as FullPost[]).filter(
         post => post.account.author.toBase58() === publicKey.toBase58()
       );
@@ -49,18 +79,39 @@ export default function ProfilePage() {
 
   useEffect(() => {
     getPosts();
-  }, [getPosts]);
+    fetchProfile();
+  }, [getPosts, fetchProfile]);
 
-  // Calculate stats
+  const handleInitProfile = async () => {
+    if (!program) return;
+    setInitProfileLoading(true);
+    try {
+      await initUserProfile(program);
+      toast.success("Profile initialized! You can now track your stats.");
+      fetchProfile(); // Refresh profile data
+    } catch (e: any) {
+      console.error("Failed to initialize profile:", e);
+      toast.error("Failed to initialize profile.");
+    } finally {
+      setInitProfileLoading(false);
+    }
+  };
+
+  // Note: We use chain data for stats if available, otherwise fallback to client-side calculation for now
   const stats = useMemo(() => {
+    if (userProfile) {
+      return {
+        totalPosts: userProfile.postCount,
+        totalLikesReceived: userProfile.likeCount,
+        totalTipsReceived: (userProfile.tipCount / 1_000_000_000).toFixed(3), // Convert lamports to SOL
+      };
+    }
     return {
       totalPosts: posts.length,
-      totalCommentsReceived: posts.reduce((acc, post) => acc + new BN(post.account.commentCount).toNumber(), 0),
-      // Note: Total tips received would require fetching transaction history or storing it on-chain, 
-      // which is not currently implemented in the contract state directly for efficient querying.
-      // We can show total posts and total comments for now.
+      totalLikesReceived: 0, // Fallback
+      totalTipsReceived: "0.000",
     };
-  }, [posts]);
+  }, [posts, userProfile]);
 
   if (!publicKey) {
     return (
@@ -77,31 +128,53 @@ export default function ProfilePage() {
     <main className="max-w-3xl mx-auto px-4 py-8">
       {/* Profile Header */}
       <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700 mb-8">
-        <div className="flex items-center gap-6 mb-6">
-          <div 
-            className="w-20 h-20 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg"
-            style={{ backgroundColor: `hsl(${parseInt(publicKey.toBase58().slice(0, 2), 16) * 4}, 70%, 60%)` }}
-          >
-            {publicKey.toBase58().slice(0, 2).toUpperCase()}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-6">
+            <div 
+              className="w-20 h-20 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg"
+              style={{ backgroundColor: `hsl(${parseInt(publicKey.toBase58().slice(0, 2), 16) * 4}, 70%, 60%)` }}
+            >
+              {publicKey.toBase58().slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">My Profile</h1>
+              <p className="text-gray-500 dark:text-gray-400 font-mono text-sm mt-1 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-lg inline-block">
+                {publicKey.toBase58()}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">My Profile</h1>
-            <p className="text-gray-500 dark:text-gray-400 font-mono text-sm mt-1 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-lg inline-block">
-              {publicKey.toBase58()}
-            </p>
-          </div>
+          
+          {!userProfile && !profileLoading && (
+            <button
+              onClick={handleInitProfile}
+              disabled={initProfileLoading}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg shadow-md transition-colors disabled:opacity-50"
+            >
+              {initProfileLoading ? "Initializing..." : "Start Cultivation Journey"}
+            </button>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-4 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{stats.totalPosts}</div>
-            <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">Posts Created</div>
+        {userProfile ? (
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-4 text-center">
+              <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{stats.totalPosts}</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">Posts</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-4 text-center">
+              <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{stats.totalLikesReceived}</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">Likes Received</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-4 text-center">
+              <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{stats.totalTipsReceived}</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">SOL Earned</div>
+            </div>
           </div>
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-4 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{stats.totalCommentsReceived}</div>
-            <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">Comments Received</div>
+        ) : (
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-xl p-4 text-center text-yellow-700 dark:text-yellow-300 text-sm">
+            Initialize your profile to start tracking your cultivation stats (posts, likes, earnings).
           </div>
-        </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between mb-6">
@@ -141,7 +214,7 @@ export default function ProfilePage() {
             postPublicKey={post.publicKey}
             postAccount={post.account}
             refreshPosts={getPosts}
-            onTopicClick={() => {}} // No-op on profile page for now, or could redirect to home with filter
+            onTopicClick={() => {}} 
           />
         ))}
       </div>

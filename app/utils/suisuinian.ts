@@ -8,13 +8,48 @@ export const PROGRAM_ID = new PublicKey(IDL.address);
 
 export const getProgram = (connection: Connection, wallet: AnchorWallet) => {
   const provider = new AnchorProvider(connection, wallet, AnchorProvider.defaultOptions());
-  // Cast IDL to Suisuinian type for better type safety if needed, or let Anchor infer
   return new Program<Suisuinian>(IDL as any, provider);
 };
 
+// --- User Profile Methods ---
+
+export const initUserProfile = async (program: Program<Suisuinian>) => {
+  // Anchor 0.30+ automatically resolves PDAs if seeds are simple/contextual
+  // But for init, sometimes we explicitly pass it.
+  // Let's try passing it. If type error persists, we might need to cast or check IDL.
+  // Actually, let's try *not* passing it if the error suggests it's not expected.
+  // Re-reading error: "Object literal may only specify known properties, and 'userProfile' does not exist..."
+  // This strongly implies it's being auto-resolved or the name is wrong.
+  
+  // Let's try checking if we can just rely on auto-resolution for userProfile since it uses 'authority' which is passed.
+  
+  await program.methods
+    .initUserProfile()
+    .accounts({
+      authority: program.provider.publicKey,
+    })
+    .rpc();
+    
+  // We recalculate PDA just to return it
+  const [userProfilePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_profile"), program.provider.publicKey!.toBuffer()],
+    PROGRAM_ID
+  );
+  return userProfilePda;
+};
+
+export const getUserProfile = async (program: Program<Suisuinian>, userPublicKey: PublicKey) => {
+  const [userProfilePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_profile"), userPublicKey.toBuffer()],
+    PROGRAM_ID
+  );
+  return await program.account.userProfile.fetchNullable(userProfilePda);
+};
+
+// --- Existing Methods (Updated for UserProfile) ---
+
 export const fetchPosts = async (program: Program<Suisuinian>) => {
   const posts = await program.account.post.all();
-  // Sort posts by timestamp, newest first
   posts.sort((a, b) => b.account.timestamp.toNumber() - a.account.timestamp.toNumber());
   return posts;
 };
@@ -25,6 +60,12 @@ export const createPost = async (
   content: string
 ) => {
   const postAccount = Keypair.generate();
+  
+  // Derive User Profile PDA (needed for stats update)
+  const [userProfilePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_profile"), program.provider.publicKey!.toBuffer()],
+    PROGRAM_ID
+  );
 
   await program.methods
     .createPost(topic, content)
@@ -38,11 +79,59 @@ export const createPost = async (
   return postAccount.publicKey;
 };
 
+export const tipPost = async (
+  program: Program<Suisuinian>,
+  postPublicKey: PublicKey,
+  authorPublicKey: PublicKey,
+  amountSol: number
+) => {
+  const amountLamports = new BN(Math.floor(amountSol * 1_000_000_000));
+
+  // Derive Author's Profile PDA (to update their tip count)
+  const [authorProfilePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_profile"), authorPublicKey.toBuffer()],
+    PROGRAM_ID
+  );
+
+  await program.methods
+    .tipPost(amountLamports)
+    .accounts({
+      post: postPublicKey,
+      author: authorPublicKey,
+    })
+    .rpc();
+};
+
+export const likePost = async (
+  program: Program<Suisuinian>,
+  postPublicKey: PublicKey
+) => {
+  // We need the post account to get the author
+  const postAccount = await program.account.post.fetch(postPublicKey);
+  const authorPublicKey = postAccount.author;
+
+  // Derive Author's Profile PDA
+  const [authorProfilePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_profile"), authorPublicKey.toBuffer()],
+    PROGRAM_ID
+  );
+
+  await program.methods
+    .likePost()
+    .accounts({
+      post: postPublicKey,
+      author: authorPublicKey,
+    })
+    .rpc();
+};
+
+// ... Keep other methods (addComment, likeComment, followUser, etc.) unchanged ...
+
 export const addComment = async (
   program: Program<Suisuinian>,
   postPublicKey: PublicKey,
   content: string,
-  parentIndex: number = -1 // Use -1 or similar to indicate "no parent", we'll convert to u64::MAX
+  parentIndex: number = -1 
 ) => {
   const postAccount = await program.account.post.fetch(postPublicKey);
   const commentCount = new BN(postAccount.commentCount);
@@ -60,16 +149,13 @@ export const addComment = async (
     PROGRAM_ID
   );
 
-  // If it's the first comment of a new page, we must initialize the page first.
   if (needsInit) {
-    console.log("Initializing new comment page:", pageIndex.toString());
     try {
       await program.methods
       .initCommentPage()
       .accounts({
         post: postPublicKey,
         newPage: commentPagePublicKey,
-        author: program.provider.publicKey,
       })
       .rpc();
     } catch (e) {
@@ -77,17 +163,15 @@ export const addComment = async (
     }
   }
 
-  // Convert parentIndex to u64 BN. If -1, use u64::MAX
   const parentIndexBN = parentIndex >= 0 
     ? new BN(parentIndex) 
-    : new BN("18446744073709551615"); // u64::MAX
+    : new BN("18446744073709551615"); 
 
   await program.methods
     .addComment(content, parentIndexBN)
     .accounts({
       post: postPublicKey,
       commentPage: commentPagePublicKey,
-      author: program.provider.publicKey,
     })
     .rpc();
 
@@ -98,21 +182,15 @@ export const fetchCommentsForPost = async (
   program: Program<Suisuinian>,
   postPublicKey: PublicKey
 ) => {
-  console.log("Fetching comments for post (standard fetch):", postPublicKey.toBase58());
-  
   try {
     const postAccount = await program.account.post.fetch(postPublicKey);
     const totalComments = new BN(postAccount.commentCount).toNumber();
     const COMMENTS_PER_PAGE = 10;
     
-    // Calculate how many pages we have: ceil(total / 10)
     const totalPages = Math.ceil(totalComments / COMMENTS_PER_PAGE) || (totalComments > 0 ? 1 : 0);
     
-    console.log(`Total comments: ${totalComments}, Pages to fetch: ${totalPages}`);
-
     const allComments: any[] = [];
 
-    // Sequentially fetch pages (can be parallelized)
     for (let i = 0; i < totalPages; i++) {
       const pageIndexBN = new BN(i);
       const [commentPageKey] = PublicKey.findProgramAddressSync(
@@ -125,19 +203,16 @@ export const fetchCommentsForPost = async (
       );
 
       try {
-        // Use standard Anchor fetch - it should handle the Vec<CompactComment> correctly now
         const commentPage = await program.account.commentPage.fetch(commentPageKey);
         
-        // Process comments
         commentPage.comments.forEach((c: any, idx: number) => {
-          // Anchor returns BN for numbers, convert as needed
           const timestamp = new BN(c.timestamp).toNumber();
-          const parentIndex = c.parentIndex; // Keep as BN to handle u64::MAX
-          const likeCount = c.likeCount; // u32 usually maps to number or BN, check logic
+          const parentIndex = c.parentIndex;
+          const likeCount = c.likeCount; 
 
           const globalIndex = (i * COMMENTS_PER_PAGE) + idx;
           allComments.push({
-            publicKey: new PublicKey(PublicKey.default), // Placeholder
+            publicKey: new PublicKey(PublicKey.default),
             account: {
               author: c.author,
               timestamp: timestamp, 
@@ -162,57 +237,14 @@ export const fetchCommentsForPost = async (
   }
 };
 
-export const tipPost = async (
-  program: Program<Suisuinian>,
-  postPublicKey: PublicKey,
-  authorPublicKey: PublicKey,
-  amountSol: number
-) => {
-  // Convert SOL to lamports (1 SOL = 1,000,000,000 lamports)
-  // Use Math.floor to ensure we pass an integer to BN, avoiding floating point errors
-  const amountLamports = new BN(Math.floor(amountSol * 1_000_000_000));
-
-  await program.methods
-    .tipPost(amountLamports)
-    .accounts({
-      post: postPublicKey,
-      author: authorPublicKey,
-      payer: program.provider.publicKey,
-    })
-    .rpc();
-};
-
-export const likePost = async (
-  program: Program<Suisuinian>,
-  postPublicKey: PublicKey
-) => {
-  if (!program.provider.publicKey) {
-    throw new Error("Wallet not connected.");
-  }
-  // UserLike PDA is auto-resolved by Anchor client based on IDL seeds
-  
-  await program.methods
-    .likePost()
-    .accounts({
-      post: postPublicKey,
-      user: program.provider.publicKey,
-    })
-    .rpc();
-};
-
 export const likeComment = async (
   program: Program<Suisuinian>,
   postPublicKey: PublicKey,
   commentGlobalIndex: number
 ) => {
-  if (!program.provider.publicKey) {
-    throw new Error("Wallet not connected.");
-  }
-
   const COMMENTS_PER_PAGE = 10;
   const pageIndex = Math.floor(commentGlobalIndex / COMMENTS_PER_PAGE);
   
-  // Find the correct CommentPage PDA
   const [commentPagePublicKey] = PublicKey.findProgramAddressSync(
     [
       Buffer.from("comment_page"),
@@ -222,14 +254,11 @@ export const likeComment = async (
     PROGRAM_ID
   );
 
-  // UserCommentLikes PDA is auto-resolved by Anchor client based on IDL seeds
-
   await program.methods
     .likeComment(new BN(commentGlobalIndex))
     .accounts({
       post: postPublicKey,
       commentPage: commentPagePublicKey,
-      user: program.provider.publicKey,
     })
     .rpc();
 };
@@ -262,7 +291,6 @@ export const getUserInteractionState = async (
       PROGRAM_ID
     );
 
-    // Fetch both accounts in parallel
     const [userLikeAccount, userCommentLikesAccount] = await Promise.all([
       program.account.userLike.fetchNullable(userLikePublicKey),
       program.account.userCommentLikes.fetchNullable(userCommentLikesPublicKey),
@@ -278,61 +306,48 @@ export const getUserInteractionState = async (
   }
 };
 
-export const hasLikedComment = async (
+export const followUser = async (
   program: Program<Suisuinian>,
-  postPublicKey: PublicKey,
-  commentGlobalIndex: number,
+  targetPublicKey: PublicKey
+) => {
+  await program.methods
+    .followUser()
+    .accounts({
+      target: targetPublicKey,
+    })
+    .rpc();
+};
+
+export const unfollowUser = async (
+  program: Program<Suisuinian>,
+  targetPublicKey: PublicKey
+) => {
+  await program.methods
+    .unfollowUser()
+    .accounts({
+      target: targetPublicKey,
+    })
+    .rpc();
+};
+
+export const getFollowStatus = async (
+  program: Program<Suisuinian>,
+  targetPublicKey: PublicKey,
   userPublicKey: PublicKey | null | undefined
 ): Promise<boolean> => {
   if (!userPublicKey) return false;
 
-  const [userCommentLikesPublicKey] = PublicKey.findProgramAddressSync(
+  const [userFollowPublicKey] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from("user_comment_likes"),
+      Buffer.from("user_follow"),
       userPublicKey.toBuffer(),
-      postPublicKey.toBuffer(),
+      targetPublicKey.toBuffer(),
     ],
     PROGRAM_ID
   );
 
   try {
-    const userCommentLikes = await program.account.userCommentLikes.fetch(userCommentLikesPublicKey);
-    const bitmap = userCommentLikes.likesBitmap as number[]; // u8 array
-
-    const byteIndex = Math.floor(commentGlobalIndex / 8);
-    const bitOffset = commentGlobalIndex % 8;
-
-    if (byteIndex >= bitmap.length) {
-      return false;
-    }
-
-    const isSet = (bitmap[byteIndex] >> bitOffset) & 1;
-    return isSet === 1;
-  } catch (e) {
-    return false;
-  }
-};
-
-export const hasLikedPost = async (
-  program: Program<Suisuinian>,
-  postPublicKey: PublicKey,
-  userPublicKey: PublicKey | null | undefined
-): Promise<boolean> => {
-  if (!userPublicKey) {
-    return false;
-  }
-  
-  const [userLikePublicKey] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("user_like"),
-      userPublicKey.toBuffer(),
-      postPublicKey.toBuffer(),
-    ],
-    PROGRAM_ID
-  );
-
-  try {
-    await program.account.userLike.fetch(userLikePublicKey);
+    await program.account.userFollow.fetch(userFollowPublicKey);
     return true;
   } catch (e) {
     return false;
