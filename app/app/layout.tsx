@@ -4,6 +4,7 @@ import "@/app/globals.css";
 import { Inter } from "next/font/google";
 import dynamic from "next/dynamic";
 import { Header } from "@/components/Header";
+import { Toaster } from "react-hot-toast";
 
 // Default styles that can be overridden by your app
 require("@solana/wallet-adapter-react-ui/styles.css");
@@ -24,6 +25,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.className} bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-50`}>
         <WalletContextProvider>
+          <Toaster position="bottom-right" />
           <Header />
           <main className="pt-24 min-h-screen">
             {children}

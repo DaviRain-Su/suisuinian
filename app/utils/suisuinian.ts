@@ -169,7 +169,8 @@ export const tipPost = async (
   amountSol: number
 ) => {
   // Convert SOL to lamports (1 SOL = 1,000,000,000 lamports)
-  const amountLamports = new BN(amountSol * 1_000_000_000);
+  // Use Math.floor to ensure we pass an integer to BN, avoiding floating point errors
+  const amountLamports = new BN(Math.floor(amountSol * 1_000_000_000));
 
   await program.methods
     .tipPost(amountLamports)
@@ -231,6 +232,50 @@ export const likeComment = async (
       user: program.provider.publicKey,
     })
     .rpc();
+};
+
+export const getUserInteractionState = async (
+  program: Program<Suisuinian>,
+  postPublicKey: PublicKey,
+  userPublicKey: PublicKey | null | undefined
+): Promise<{ postLiked: boolean; commentLikesBitmap: number[] | null }> => {
+  if (!userPublicKey) {
+    return { postLiked: false, commentLikesBitmap: null };
+  }
+
+  try {
+    const [userLikePublicKey] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("user_like"),
+        userPublicKey.toBuffer(),
+        postPublicKey.toBuffer(),
+      ],
+      PROGRAM_ID
+    );
+
+    const [userCommentLikesPublicKey] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("user_comment_likes"),
+        userPublicKey.toBuffer(),
+        postPublicKey.toBuffer(),
+      ],
+      PROGRAM_ID
+    );
+
+    // Fetch both accounts in parallel
+    const [userLikeAccount, userCommentLikesAccount] = await Promise.all([
+      program.account.userLike.fetchNullable(userLikePublicKey),
+      program.account.userCommentLikes.fetchNullable(userCommentLikesPublicKey),
+    ]);
+
+    return {
+      postLiked: !!userLikeAccount,
+      commentLikesBitmap: userCommentLikesAccount ? (userCommentLikesAccount.likesBitmap as number[]) : null,
+    };
+  } catch (e) {
+    console.error("Error fetching interaction state:", e);
+    return { postLiked: false, commentLikesBitmap: null };
+  }
 };
 
 export const hasLikedComment = async (
