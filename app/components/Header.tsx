@@ -36,6 +36,16 @@ export const Header = () => {
             >
               Write
             </Link>
+            <Link 
+              href="/profile" 
+              className={`text-sm font-medium transition-colors ${
+                pathname === "/profile" 
+                  ? "text-gray-900 dark:text-white" 
+                  : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+            >
+              Profile
+            </Link>
           </nav>
         </div>
 
